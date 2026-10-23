@@ -1,0 +1,13 @@
+{
+  "_说明": "复制为 plugins/example/rising-stones.json，插件运行时会自己写入。格式示例：",
+  "_格式": {
+    "你的QQ号": {
+      "cookie": "从石之家网页复制的 Cookie（#石之家绑定 会自动写入）",
+      "ua": "浏览器 UA",
+      "auto": true,
+      "last": "2026-01-01",
+      "updated": 1767225600000,
+      "refresh": true
+    }
+  }
+}

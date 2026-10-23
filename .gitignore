@@ -1,0 +1,19 @@
+# .gitignore
+node_modules/
+*.log
+
+# 本地数据（clone 后自行生成，不入库）
+plugins/*/data/*.json
+plugins/*/data/*.xlsx
+plugins/*/data/*.csv
+
+# 凭据
+plugins/fflogs/fflogs.json
+plugins/rising-stones/rising-stones.json
+cookie.txt
+profile/
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini

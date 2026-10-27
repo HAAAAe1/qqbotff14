@@ -17,6 +17,7 @@
 | [`plugins/house-subscribe`](plugins/house-subscribe) | 房屋在售订阅 | `#房屋查询` / `#房屋查询订阅` / `#房屋查询退订` | house.ffxiv.cyou |
 | [`plugins/pvp`](plugins/pvp) | PVP 轮换 + 前线小游戏 | `#pvp`　`#战场` / `#前线` | 无 |
 | [`plugins/rising-stones`](plugins/rising-stones) | 石之家签到 | `#石之家签到` / `#石之家绑定` / `#石之家自动签到` | 石之家 + Playwright 刷 Cookie |
+| [`plugins/music`](plugins/music) | 本地曲库语音放歌 | `#放首歌`　`#放整首 歌名`　`#音乐 歌名 [秒]`　`#音乐列表` | 无（纯本地 + ffmpeg） |
 
 命令速查见 [`docs/命令速查.md`](docs/命令速查.md)。
 
@@ -146,6 +147,18 @@ export FF14_SIGNIN_PYTHON=C:/path/to/python.exe   # 默认用 PATH 里的 python
 
 Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**。
 
+### music
+
+本地曲库发**语音消息**（不是语音通话，是 QQ 的语音条）。曲库目录默认 `D:/QQBot/music`，可用环境变量 `VOICE_MUSIC_DIR` 覆盖，支持 `mp3 flac wav m4a ogg aac wma opus ape`，子目录递归扫描。
+
+- 依赖 `ffmpeg` + `ffprobe` 在 PATH（或设 `FFMPEG_PATH` / `FFPROBE_PATH`）。**ffprobe 不能拿 ffmpeg 冒充**，`-show_entries` 参数不认会静默返回空、时长恒 0
+- 高潮定位三层：手工标注 → 自动分析（ffmpeg 解码 16kHz 单声道 PCM，每 0.5s 一帧算 RMS 响度 + 差分能量，滑 28s 窗口取最热闹且稳定的一段）→ 解码失败直接报错，不瞎切
+- QQ 语音单条上限约 60 秒。`#放整首` 按 60 秒拆成多条依次发（段间停 1.2s），最多 12 段；尾巴不足 5 秒就少发一段，避免出现 1 秒残段
+- 随机播放用洗牌袋：一轮内每首都会轮到一次，播完重洗，新轮首曲避开上轮末曲
+- 标注存 `plugins/example/data/voice-hooks.json`，按文件 mtime 校验，曲子换了标注自动失效
+
+曲库里**放自己的音频文件**，仓库不含任何音频。
+
 ---
 
 ## 数据文件
@@ -159,6 +172,7 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 | `data/bis-data.json` | `#更新bis` 生成 |
 | `data/bis-state.json` | 检测文档版本用，自动生成 |
 | `data/house-subscribe.json` | 订阅时自动生成 |
+| `data/voice-hooks.json` | `#音乐标注 歌名 60-95` 写入的高潮区间 |
 | `rising-stones.json` | `#石之家绑定` 写入 |
 
 ---

@@ -17,7 +17,7 @@
 | [`plugins/house-subscribe`](plugins/house-subscribe) | 房屋在售订阅 | `#房屋查询` / `#房屋查询订阅` / `#房屋查询退订` | house.ffxiv.cyou |
 | [`plugins/pvp`](plugins/pvp) | PVP 轮换 + 前线小游戏 | `#pvp`　`#战场` / `#前线` | 无 |
 | [`plugins/rising-stones`](plugins/rising-stones) | 石之家签到 | `#石之家签到` / `#石之家绑定` / `#石之家自动签到` | 石之家 + Playwright 刷 Cookie |
-| [`plugins/music`](plugins/music) | 本地曲库语音放歌 | `#放首歌`　`#放整首 歌名`　`#音乐 歌名 [秒]`　`#音乐列表` | 无（纯本地 + ffmpeg） |
+| [`plugins/music`](plugins/music) | 本地曲库语音放歌 | `#放首歌`　`#放整首 歌名`　`#音乐 歌名 [秒]`　`#音乐列表`　`#放首哈基米歌` | 无（纯本地 + ffmpeg） |
 
 命令速查见 [`docs/命令速查.md`](docs/命令速查.md)。
 
@@ -149,7 +149,16 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 
 ### music
 
-本地曲库发**语音消息**（不是语音通话，是 QQ 的语音条）。曲库目录默认 `D:/QQBot/music`，可用环境变量 `VOICE_MUSIC_DIR` 覆盖，支持 `mp3 flac wav m4a ogg aac wma opus ape`，子目录递归扫描。
+本地曲库发**语音消息**（不是语音通话，是 QQ 的语音条）。支持 `mp3 flac wav m4a ogg aac wma opus ape`，子目录递归扫描。
+
+**两个独立曲库**，目录和洗牌袋都互相隔离：
+
+| 曲库 | 目录 | 环境变量 | 命令 |
+|---|---|---|---|
+| 主库 | `D:/QQBot/music` | `VOICE_MUSIC_DIR` | `#放首歌`　`#放整首 歌名`　`#音乐 歌名 [秒]`　`#音乐列表` |
+| 哈基米库 | `D:/QQBot/music-hajimi` | `HAJIMI_MUSIC_DIR` | `#放首哈基米歌 [秒]`　`#哈基米列表` |
+
+曲库定义在 `LIBS` 里（每库带 `dir/name/icon/scanCmd/key`），加第三个曲库只需加一项 + 补 fnc 和 rule。**随机队列按 `lib.key` 用 Map 隔离**，两个库不会互相挤掉轮次。哈基米库目前只有随机 + 列表 + 扫描，不支持指定歌名和整首拆段。
 
 - 依赖 `ffmpeg` + `ffprobe` 在 PATH（或设 `FFMPEG_PATH` / `FFPROBE_PATH`）。**ffprobe 不能拿 ffmpeg 冒充**，`-show_entries` 参数不认会静默返回空、时长恒 0
 - 高潮定位三层：手工标注 → 自动分析（ffmpeg 解码 16kHz 单声道 PCM，每 0.5s 一帧算 RMS 响度 + 差分能量，滑 28s 窗口取最热闹且稳定的一段）→ 解码失败直接报错，不瞎切

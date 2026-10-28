@@ -16,7 +16,15 @@
  *   #音乐标注 <歌名> 60-95  记住这首歌的高潮区间，下次直接用（仅 bot 管理员）
  *   #音乐清除标注 <歌名>    删掉标注，回到自动分析（仅 bot 管理员）
  *
+ *   #放首哈基米歌           从哈基米曲库随机放一首
+ *                          同义触发词：#放哈基米歌 / #听哈基米歌 / #哈基米歌
+ *   #放首哈基米歌 45        同上，截 45 秒
+ *   #哈基米列表             看哈基米曲库（转发形式，一条消息）
+ *   #哈基米扫描             重新扫描哈基米曲库（仅 bot 管理员）
+ *
  * 曲库目录：默认 D:/QQBot/music，可用环境变量 VOICE_MUSIC_DIR 覆盖
+ * 哈基米曲库：默认 D:/QQBot/music-hajimi，可用 HAJIMI_MUSIC_DIR 覆盖
+ * 两个库各自独立的洗牌袋与目录，互不影响；高潮标注按文件绝对路径存，天然隔离
  * 支持格式：mp3 flac wav m4a ogg aac wma opus ape
  *
  * 高潮定位（三层，优先级由高到低）
@@ -39,7 +47,27 @@ import { fileURLToPath } from 'node:url'
 const exec = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const MUSIC_DIR = process.env.VOICE_MUSIC_DIR || 'D:/QQBot/music'
+/**
+ * 曲库定义：每个库独立目录、独立随机队列（洗牌袋互不干扰）
+ * 新增曲库只在这里加一项，再补对应的 fnc 与 rule 即可
+ */
+const LIBS = {
+  main: {
+    key: 'main',
+    dir: process.env.VOICE_MUSIC_DIR || 'D:/QQBot/music',
+    name: '曲库',
+    icon: '🎵',
+    scanCmd: '#音乐扫描'
+  },
+  hajimi: {
+    key: 'hajimi',
+    dir: process.env.HAJIMI_MUSIC_DIR || 'D:/QQBot/music-hajimi',
+    name: '哈基米曲库',
+    icon: '🐱',
+    scanCmd: '#哈基米扫描'
+  }
+}
+const MUSIC_DIR = LIBS.main.dir
 const DATA_DIR = path.join(__dirname, 'data')
 const HOOK_FILE = path.join(DATA_DIR, 'voice-hooks.json')
 const TMP_DIR = path.join(DATA_DIR, 'voice-tmp')
@@ -63,12 +91,28 @@ const RANDOM_REG_SRC = RANDOM_ALIASES.join('|')
 /** 匹配「标记 + 可选时长」的整句，用于 random() 里取时间参数 */
 const RANDOM_MSG_RE = new RegExp(`^#(?:${RANDOM_REG_SRC})\\s*(.*)$`)
 
+/** 哈基米曲库的随机触发词（独立曲库，与主曲库不共用洗牌袋） */
+const HAJIMI_ALIASES = ['放首哈基米歌', '放哈基米歌', '听哈基米歌', '哈基米歌']
+const HAJIMI_REG_SRC = HAJIMI_ALIASES.join('|')
+const HAJIMI_MSG_RE = new RegExp(`^#(?:${HAJIMI_REG_SRC})\\s*(.*)$`)
+
 const SAMPLE_RATE = 16000
 const FRAME_SEC = 0.5
 
-/** 随机播放队列（洗牌袋）：一轮内不重复，播完重新洗牌；lastPlayed 用来避免跨轮立刻重复 */
-let playQueue = []
-let lastPlayed = ''
+/**
+ * 随机播放队列（洗牌袋）：一轮内不重复，播完重新洗牌；last 用来避免跨轮立刻重复
+ * 按曲库分开存（key = lib.key），否则哈基米歌会和主曲库串在同一个队列里
+ */
+const playStates = new Map()
+
+function playState (key) {
+  let st = playStates.get(key)
+  if (!st) {
+    st = { queue: [], last: '' }
+    playStates.set(key, st)
+  }
+  return st
+}
 
 /* ---------------- ffmpeg ---------------- */
 
@@ -152,8 +196,8 @@ function walk (dir, out = [], depth = 0) {
  * 每次实时扫目录（readdir + stat，几十首歌只要几毫秒）
  * 不做跨命令缓存：否则刚丢进来的歌会因为「空曲库缓存」而认不出来
  */
-function scanLibrary () {
-  return walk(MUSIC_DIR).sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+function scanLibrary (dir = MUSIC_DIR) {
+  return walk(dir).sort((a, b) => a.name.localeCompare(b.name, 'zh'))
 }
 
 /* ---------------- 歌名匹配 ---------------- */
@@ -202,23 +246,26 @@ function search (tracks, q) {
 /**
  * 洗牌袋随机：一轮内每首都会轮到一次，播完重洗
  * 新的一轮第一首不会和上一轮最后一首重复；曲库删掉的歌会自动从队列清掉
+ * @param {Array} tracks 曲库条目
+ * @param {string} key   曲库标识（洗牌袋按库独立，默认主曲库）
  */
-function nextRandom (tracks) {
+function nextRandom (tracks, key = 'main') {
   if (!tracks.length) return null
+  const st = playState(key)
   const alive = new Set(tracks.map(t => t.file))
-  playQueue = playQueue.filter(f => alive.has(f))
-  if (!playQueue.length) {
-    playQueue = tracks.map(t => t.file)
-    for (let i = playQueue.length - 1; i > 0; i--) {
+  st.queue = st.queue.filter(f => alive.has(f))
+  if (!st.queue.length) {
+    st.queue = tracks.map(t => t.file)
+    for (let i = st.queue.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
-      const tmp = playQueue[i]
-      playQueue[i] = playQueue[j]
-      playQueue[j] = tmp
+      const tmp = st.queue[i]
+      st.queue[i] = st.queue[j]
+      st.queue[j] = tmp
     }
-    if (playQueue.length > 1 && playQueue[0] === lastPlayed) playQueue.push(playQueue.shift())
+    if (st.queue.length > 1 && st.queue[0] === st.last) st.queue.push(st.queue.shift())
   }
-  const file = playQueue.shift()
-  lastPlayed = file
+  const file = st.queue.shift()
+  st.last = file
   return tracks.find(t => t.file === file) || null
 }
 
@@ -428,6 +475,9 @@ export class voiceMusic extends plugin {
         { reg: '^#音乐信息\\s+(.+)$', fnc: 'info' },
         { reg: `^#(?:${FULL_REG_SRC})(?:\\s+(.+))?$`, fnc: 'full' },
         { reg: `^#(?:${RANDOM_REG_SRC})\\s*(\\d+(?:\\s*[-~到至]\\s*\\d+)?)?$`, fnc: 'random' },
+        { reg: '^#哈基米扫描$', fnc: 'hajimiRescan', permission: 'master' },
+        { reg: '^#哈基米列表$', fnc: 'hajimiList' },
+        { reg: `^#(?:${HAJIMI_REG_SRC})\\s*(\\d+(?:\\s*[-~到至]\\s*\\d+)?)?$`, fnc: 'hajimiRandom' },
         { reg: '^#音乐(?:\\s+(.+))?$', fnc: 'play' }
       ]
     })
@@ -473,6 +523,55 @@ export class voiceMusic extends plugin {
       logger?.warn?.(`[voice-music] 转发发送失败：${err.message}`)
       return false
     }
+  }
+
+  /* ---------------- 哈基米曲库（与主曲库完全独立） ---------------- */
+
+  async hajimiRescan () {
+    const lib = LIBS.hajimi
+    const tracks = scanLibrary(lib.dir)
+    await this.e.reply(`已重新扫描${lib.name}：${lib.dir}\n共 ${tracks.length} 首`)
+    return true
+  }
+
+  async hajimiList () {
+    const lib = LIBS.hajimi
+    const tracks = scanLibrary(lib.dir)
+    if (!tracks.length) {
+      await this.e.reply(`${lib.name}是空的。\n把 mp3 / flac 等音频放进：${lib.dir}\n放好后发 ${lib.scanCmd}`)
+      return true
+    }
+    const lines = [`${lib.icon} ${lib.name}共 ${tracks.length} 首`, '']
+    tracks.forEach((t, i) => lines.push(`${i + 1}. ${t.name}`))
+    lines.push('', `曲库目录：${lib.dir}`)
+    // 与 #音乐列表 一致：不分页，全部塞进一个转发气泡
+    const text = lines.join('\n')
+    const ok = await this.sendForward([text])
+    if (!ok) await this.e.reply(text)
+    return true
+  }
+
+  /** 随机放一首哈基米音乐，洗牌袋独立于主曲库 */
+  async hajimiRandom () {
+    const lib = LIBS.hajimi
+    const tracks = scanLibrary(lib.dir)
+    if (!tracks.length) {
+      await this.e.reply(`${lib.name}是空的。\n把 mp3 / flac 等音频放进：${lib.dir}\n放好后发 ${lib.scanCmd}`)
+      return true
+    }
+    const timeArg = (this.e.msg.match(HAJIMI_MSG_RE)?.[1] || '').trim()
+
+    const tried = []
+    for (let i = 0; i < Math.min(3, tracks.length); i++) {
+      const track = nextRandom(tracks, lib.key)
+      if (!track) break
+      tried.push(track.name)
+      // 中间失败不刷屏，让队列继续往后走
+      const ok = await this.sendTrack(track, timeArg, `${lib.icon} 哈基米`, i < 2)
+      if (ok) return true
+    }
+    await this.e.reply(`随机放了 ${tried.length} 首都没成功（${tried.join('、')}），发 #哈基米列表 看看曲库`)
+    return true
   }
 
   async mark () {
@@ -575,7 +674,10 @@ export class voiceMusic extends plugin {
         '· #音乐 晴天 62-95 —— 手动指定起止\n' +
         '· #音乐列表 —— 看曲库\n' +
         '· #音乐信息 晴天 —— 看时长和高潮段\n' +
-        `曲库目录：${MUSIC_DIR}`
+        '· #放首哈基米歌 —— 从哈基米曲库随机放一首（独立曲库）\n' +
+        '· #哈基米列表 —— 看哈基米曲库\n' +
+        `曲库目录：${MUSIC_DIR}\n` +
+        `哈基米曲库：${LIBS.hajimi.dir}`
       )
       return true
     }

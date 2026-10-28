@@ -19,6 +19,7 @@
 | [`plugins/rising-stones`](plugins/rising-stones) | 石之家签到 | `#石之家签到` / `#石之家绑定` / `#石之家自动签到` | 石之家 + Playwright 刷 Cookie |
 | [`plugins/glamour`](plugins/glamour) | 石之家随机幻化 | `#随机幻化`　`#随机幻化 拉拉肥` | 石之家（复用 rising-stones 的 Cookie） |
 | [`plugins/news`](plugins/news) | 国服公告推送 | `#开启ff14新闻推送`　`#关闭ff14新闻推送`　`#查看ff14最近新闻` | cqnews.web.sdo.com |
+| [`plugins/sites`](plugins/sites) | FF14 网站导航检索 | `#查网站 物价`　`#查网站`　`#更新网站` | gamecircum.com（抓取建本地索引） |
 
 命令速查见 [`docs/命令速查.md`](docs/命令速查.md)。
 
@@ -36,11 +37,12 @@ cd qqbotff14
 cp plugins/fflogs/fflogs.js      /path/to/TRSS-Yunzai/plugins/example/
 cp plugins/market/market.js      /path/to/TRSS-Yunzai/plugins/example/
 cp plugins/glamour/glamour.js    /path/to/TRSS-Yunzai/plugins/example/   # 需先装 rising-stones 并绑号
+cp plugins/sites/sites.js        /path/to/TRSS-Yunzai/plugins/example/
 ```
 
 放好后 Yunzai 的 watcher 会自动 `[新增插件]`，**不用重启**。新增/修改 `plugins/` 下的文件都会热重载；但如果改了 `utils/` 或 `apps/` 就必须重启。
 
-依赖：`puppeteer`（wiki、fflogs 出图）、`xlsx`（bis）。market 只用原生 `fetch`。
+依赖：`puppeteer`（wiki、fflogs 出图）、`xlsx`（bis）。market、news、sites 只用原生 `fetch`。
 
 ```bash
 cd /path/to/TRSS-Yunzai && pnpm add puppeteer xlsx
@@ -210,6 +212,31 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 
 </details>
 
+### sites
+
+FF14 常用网站导航的模糊检索，数据源是第三方导航站 `gamecircum.com/games/ff14/`（14 个分类，去重后 177 个站点）。**不需要凭据**，抓一次存本地，之后全走本地索引。
+
+| 命令 | 说明 |
+|---|---|
+| `#查网站` | 列出全部 14 个分类及各分类站点数 |
+| `#查网站 <需求>` | 按需求模糊搜索，返回最相关的 6 个站点（名称 / 简介 / 链接） |
+| `#查网站 <分类名>` | 输入分类名（如 `幻化相关`）时直接铺该分类，最多显示 12 个 |
+| `#更新网站` | 重新抓取导航站重建索引（仅 bot 管理员） |
+
+- 数据落盘 `data/ff14-sites.json`（原子写入，先写 `.tmp` 再 rename）。**过期 7 天后首次查询会在后台静默刷新**，不阻塞本次回复
+- 第一次用必须先能抓到数据；抓不到会提示「让 bot 管理员发 `#更新网站`」，不会静默返回空
+- 匹配分七层打分：名称精确 → 名称包含 → 描述包含 → 分类包含 → 字覆盖度 → 二元组重合 → 同义词扩展，低于 55 分不返回
+- 每人 5 秒冷却（走 redis）
+- 结果走合并转发；命中少于 3 条且不是精确命中时，末尾会带出同分类的其他站点名，方便接着翻
+- 抓取只解析 HTML 里的 `module-url-list` 块，**没装 cheerio**，纯正则 + `Map` 按 URL 归一去重（同一站点挂多个分类会合并 `cats`）
+
+<details>
+<summary>为什么要 priority 2</summary>
+
+`ff14wiki` 是 1、土块（earth-k）原本是 5。**priority 数字越小越先跑，首个命中的插件执行完直接 `return`**，所以宽正则插件会把后面的命令吃掉。这里取 2 夹在中间，保证 `#查网站` 不被抢答。
+
+</details>
+
 ---
 
 ## 数据文件
@@ -224,6 +251,7 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 | `data/bis-state.json` | 检测文档版本用，自动生成 |
 | `data/house-subscribe.json` | 订阅时自动生成 |
 | `data/ff14-news.json` | 首次 `#开启ff14新闻推送` 时生成（订阅表 + 去重表） |
+| `data/ff14-sites.json` | 首次 `#查网站` 时抓取生成，7 天后自动后台刷新 |
 | `rising-stones.json` | `#石之家绑定` 写入（glamour 也读这一份） |
 
 ---
@@ -231,7 +259,7 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 ## 免责声明
 
 - 全部是个人自用脚本，**没有做多租户隔离、权限审计、限流加固**，直接开给陌生人用风险自负
-- 第三方数据（FFLogs、Universalis、灰机 wiki、石之家、金山文档）版权归各自所有，这里只做查询封装
+- 第三方数据（FFLogs、Universalis、灰机 wiki、gamecircum、石之家、金山文档）版权归各自所有，这里只做查询封装
 - 石之家签到 / 随机幻化涉及个人账号 Cookie，请勿提交到任何公开仓库
 - 不提供任何游戏内自动化 / 外挂功能
 

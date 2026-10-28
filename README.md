@@ -17,6 +17,7 @@
 | [`plugins/house-subscribe`](plugins/house-subscribe) | 房屋在售订阅 | `#房屋查询` / `#房屋查询订阅` / `#房屋查询退订` | house.ffxiv.cyou |
 | [`plugins/pvp`](plugins/pvp) | PVP 轮换 + 前线小游戏 | `#pvp`　`#战场` / `#前线` | 无 |
 | [`plugins/rising-stones`](plugins/rising-stones) | 石之家签到 | `#石之家签到` / `#石之家绑定` / `#石之家自动签到` | 石之家 + Playwright 刷 Cookie |
+| [`plugins/glamour`](plugins/glamour) | 石之家随机幻化 | `#随机幻化`　`#随机幻化 拉拉肥` | 石之家（复用 rising-stones 的 Cookie） |
 | [`plugins/music`](plugins/music) | 本地曲库语音放歌 | `#放首歌`　`#放整首 歌名`　`#音乐 歌名 [秒]`　`#音乐列表`　`#放首哈基米歌` | 无（纯本地 + ffmpeg） |
 | [`plugins/news`](plugins/news) | 国服公告推送 | `#开启ff14新闻推送`　`#关闭ff14新闻推送`　`#查看ff14最近新闻` | cqnews.web.sdo.com |
 
@@ -35,6 +36,7 @@ cd qqbotff14
 # 按需复制，不要整个目录塞进去
 cp plugins/fflogs/fflogs.js      /path/to/TRSS-Yunzai/plugins/example/
 cp plugins/market/market.js      /path/to/TRSS-Yunzai/plugins/example/
+cp plugins/glamour/glamour.js    /path/to/TRSS-Yunzai/plugins/example/   # 需先装 rising-stones 并绑号
 ```
 
 放好后 Yunzai 的 watcher 会自动 `[新增插件]`，**不用重启**。新增/修改 `plugins/` 下的文件都会热重载；但如果改了 `utils/` 或 `apps/` 就必须重启。
@@ -148,6 +150,37 @@ export FF14_SIGNIN_PYTHON=C:/path/to/python.exe   # 默认用 PATH 里的 python
 
 Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**。
 
+### glamour
+
+从石之家随机抽一套幻化，发合并转发：图 → 文字（作者/区服/种族/装备/染色）→ 原帖链接。
+
+| 命令 | 说明 |
+|---|---|
+| `#随机幻化` | 1 次接口，约 0.5~0.8 秒 |
+| `#随机幻化 拉拉肥` | 指定种族，客户端反复刷，最多 8 次，约 0.5~4.5 秒 |
+
+- **不单独存凭据**，直接读同目录的 `rising-stones.json`（只读不写），那边每天 09:00 自动续期。没绑号提示先 `#石之家 登录`，Cookie 失效回 `10403` 时提示重绑
+- 种族别名 66 个：`拉拉肥 / 土豆 / 矮子`、`猫娘 / 猫猫 / 喵`、`龙娘 / 龙族`、`兔娘 / 兔兔 / 兔女郎`、`大猫 / 大猫猫`、`长耳`、`大块头 / 巨人`、`中原 / 高地` …，也接受数字 `1`~`8`。带「男 / 女」的词只映射种族，**不筛性别**
+- 冷却按 QQ 号记：裸命令 10 秒、带种族 30 秒；接口报错会清冷却，让用户能立刻重试
+- 图片取「主图 + 图集」去重后最多 2 张。**大部分投稿只传了一张，凑不满 2 张是正常的**（实测 20 条里只有 4 条能凑满）
+- 转发发不出去时降级成「图片一条 + 文字一条」两条普通消息
+
+> ⚠️ **`priority` 必须很小（这里用 1）**。earth-k-plugin 的「土块AI画图」带一条 `^#(.*)化$` 的宽正则，会把 `#随机幻化` 当成画图命令吞掉（回你「你还没有填写密钥哦」），而它的 priority 是 5。
+
+<details>
+<summary>接口说明与字段坑</summary>
+
+- 接口：`POST/GET https://apiff14risingstones.web.sdo.com/api/home/glamour/randomGlamours`、`glamour/glamourDetail?id=`，**必须带登录 Cookie**，否则 `{"code":10403,"msg":"请先登录"}`
+- `randomGlamours` 的返回是 `{code, msg, data: {rows: [...]}}`，**`data` 不是数组**
+- `randomGlamours` **不接受任何筛选参数**（`raceIds / race_ids / raceId / race / genderIds` 实测全被忽略），所以按种族挑只能在客户端过滤
+- `images` 可能是空串（多数情况），`main_image` 一定有；两者 URL 恒不相同，是同一套的不同镜头
+- `dye_ids` 长度常常大于 `dyes` 实际数组（如 `dye_ids=[13114,-1]` 只给 1 个染料对象），不能按长度 zip，要按下标配对
+- 列表接口的 `race_ids` 是数字数组 `[3]`，详情接口是对象数组 `[{id:3,name:'拉拉菲尔族'}]`，统一取 `id`
+- 空槽 `equipment_id = -1`，`name` 为 `null`，要跳过；`is_fashion = 1` 标「（投影）」
+- 列表接口是「首页推荐」，**不能穷举**：`page` 翻到 20000 仍返回 12 条且时间乱跳，只适合当随机 / 热门源
+
+</details>
+
 ### music
 
 本地曲库发**语音消息**（不是语音通话，是 QQ 的语音条）。支持 `mp3 flac wav m4a ogg aac wma opus ape`，子目录递归扫描。
@@ -214,7 +247,7 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 | `data/house-subscribe.json` | 订阅时自动生成 |
 | `data/voice-hooks.json` | `#音乐标注 歌名 60-95` 写入的高潮区间 |
 | `data/ff14-news.json` | 首次 `#开启ff14新闻推送` 时生成（订阅表 + 去重表） |
-| `rising-stones.json` | `#石之家绑定` 写入 |
+| `rising-stones.json` | `#石之家绑定` 写入（glamour 也读这一份） |
 
 ---
 
@@ -222,7 +255,7 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 
 - 全部是个人自用脚本，**没有做多租户隔离、权限审计、限流加固**，直接开给陌生人用风险自负
 - 第三方数据（FFLogs、Universalis、灰机 wiki、石之家、金山文档）版权归各自所有，这里只做查询封装
-- 石之家签到涉及个人账号 Cookie，请勿提交到任何公开仓库
+- 石之家签到 / 随机幻化涉及个人账号 Cookie，请勿提交到任何公开仓库
 - 不提供任何游戏内自动化 / 外挂功能
 
 ## 致谢

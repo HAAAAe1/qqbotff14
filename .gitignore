@@ -10,6 +10,7 @@ plugins/*/data/*.csv
 # 凭据
 plugins/fflogs/fflogs.json
 plugins/rising-stones/rising-stones.json
+plugins/glamour/rising-stones.json
 cookie.txt
 profile/
 

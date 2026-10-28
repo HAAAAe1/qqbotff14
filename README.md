@@ -18,6 +18,7 @@
 | [`plugins/pvp`](plugins/pvp) | PVP 轮换 + 前线小游戏 | `#pvp`　`#战场` / `#前线` | 无 |
 | [`plugins/rising-stones`](plugins/rising-stones) | 石之家签到 | `#石之家签到` / `#石之家绑定` / `#石之家自动签到` | 石之家 + Playwright 刷 Cookie |
 | [`plugins/music`](plugins/music) | 本地曲库语音放歌 | `#放首歌`　`#放整首 歌名`　`#音乐 歌名 [秒]`　`#音乐列表`　`#放首哈基米歌` | 无（纯本地 + ffmpeg） |
+| [`plugins/news`](plugins/news) | 国服公告推送 | `#开启ff14新闻推送`　`#关闭ff14新闻推送`　`#查看ff14最近新闻` | cqnews.web.sdo.com |
 
 命令速查见 [`docs/命令速查.md`](docs/命令速查.md)。
 
@@ -168,6 +169,36 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 
 曲库里**放自己的音频文件**，仓库不含任何音频。
 
+### news
+
+国服官方公告推送，数据源是盛趣官网 SPA 背后的资讯接口 `cqnews.web.sdo.com`。**不需要凭据，也不需要 cookie / Referer / UA**，裸 `fetch` 就通。
+
+| 命令 | 说明 |
+|---|---|
+| `#开启ff14新闻推送` | 订阅当前群 / 当前私聊（各自独立），开启时顺手探一次接口并把现有公告记为基线 |
+| `#关闭ff14新闻推送` | 退订当前会话 |
+| `#查看ff14最近新闻` | 立刻看最近 5 条，不订阅也能用，30 秒冷却 |
+
+- 定时任务用 Yunzai 原生 `task`，cron `10 */2 * * *`（每两小时的第 10 分钟）。公告不是行情，两小时一次足够，正确性只取决于「别停机太久」
+- 推送走**合并转发**：标题节点 → 每条公告一个节点 → 超过 8 条时补一个提示节点。转发发不出去会回退成一条纯文本
+- 分类 `8324,8325,5310`：公告（暂停/恢复）+ 最新情报（版本更新笔记、季节活动、联动、商城周边）
+- **只靠 `Id` 差集判断新旧**。接口返回不按时间排（有 `SortIndex` 人工置顶，实测 10/21 的条目排在 10/26 前面），所以一律自己按 `PublishDate` 重排
+- **先写 `seen` 再推送**：推失败也不下一轮重复刷屏，代价是那一次丢了就丢了
+- **抓不到数据就整轮退出，绝不动 `seen`**，否则网络一抖恢复后整批重推
+- 没人订阅时一次请求都不发
+
+<details>
+<summary>接口的几个坑</summary>
+
+- `pageSize` 实际上限 50，传 40 或 100 都回 50 条；传 ≤20 才精确
+- `Summary === '333'` 是官网自己隐藏的占位条目，要过滤
+- `OutLink` 非空是外链活动页，空才拼站内详情页 `.../#/newstab/newscont/<Id>`
+- `PublishDate` 形如 `2026/10/23 14:16:06`，**已经是北京时间**，不需要换算，字符串排序等于时间排序
+- 全站 852 条里 `5310` 占 613 条、其中一半是商城周边；不想被周边刷屏就把 `CATEGORIES` 改回 `8324,8325`
+- **改过 `CATEGORIES` 之后必须把数据文件里的 `seenInited` 置 `false`**，否则新分类的历史公告会被整批当成新公告推出去（实测差集 24 条）
+
+</details>
+
 ---
 
 ## 数据文件
@@ -182,6 +213,7 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 | `data/bis-state.json` | 检测文档版本用，自动生成 |
 | `data/house-subscribe.json` | 订阅时自动生成 |
 | `data/voice-hooks.json` | `#音乐标注 歌名 60-95` 写入的高潮区间 |
+| `data/ff14-news.json` | 首次 `#开启ff14新闻推送` 时生成（订阅表 + 去重表） |
 | `rising-stones.json` | `#石之家绑定` 写入 |
 
 ---
@@ -202,3 +234,4 @@ Cookie 存在 `plugins/example/rising-stones.json`，**不要提交到仓库**�
 - [灰机 wiki](https://ff14.huijiwiki.com/) — 中文资料
 - BIS 配装文档作者 **喵叔孤风行**（[原文档](https://www.kdocs.cn/l/ceEcTzlFQBUy)）
 - PVP 轮换参考 [duduvok/ff14-calendar](https://duduvok.github.io/ff14-calendar/)
+- 公告数据来自盛趣游戏《最终幻想14》国服官网
